@@ -8,51 +8,48 @@ import traceback
 # Fix import path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
-from retriever import get_vectorstore 
+from retriever import get_vectorstore
 from prompt import system_prompt
 from logger import log_to_google_sheets
 
-# Page config
+# ------------------ CONFIG ------------------
 st.set_page_config(page_title="Maa-Saathi", page_icon="🤰")
 
 st.title("🤰 Maa-Saathi")
 st.caption("Your AI companion for pregnancy & motherhood")
 
-# ✅ Check secrets
+# ------------------ CHECK SECRETS ------------------
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("❌ OPENAI_API_KEY missing in Streamlit secrets")
+    st.error("❌ OpenAI API key not found. Please configure secrets.")
     st.stop()
 
-# Load OpenAI client
+# ------------------ INIT CLIENT ------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Load vectorstore safely
+# ------------------ LOAD VECTORSTORE ------------------
 try:
     vectorstore = get_vectorstore()
-    st.write("✅ Vectorstore loaded")
 except Exception as e:
-    st.error(f"❌ Vectorstore loading failed: {e}")
+    st.error("❌ Failed to load knowledge base. Please try again later.")
     st.stop()
 
-# Debug secrets (safe keys only)
-st.write("🔑 Secrets loaded:", list(st.secrets.keys()))
-
-# Session state
+# ------------------ SESSION STATE ------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-# Display chat history
+# ------------------ DISPLAY CHAT ------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# User input
+# ------------------ USER INPUT ------------------
 user_input = st.chat_input("Ask Maa-Saathi anything...")
 
 if user_input:
+
     # Store user message
     st.session_state.messages.append({
         "role": "user",
@@ -62,24 +59,24 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Assistant response
+    # ------------------ ASSISTANT RESPONSE ------------------
     with st.chat_message("assistant"):
         with st.spinner("Thinking... 🤰"):
 
             try:
-                # 🔍 Retrieve docs
+                # 🔍 Retrieve relevant docs
                 docs = vectorstore.similarity_search(user_input, k=3)
 
-                # Context
+                # Build context safely
                 context = "\n\n".join([
-                    str(doc.page_content) for doc in docs if doc.page_content
+                    doc.page_content for doc in docs if doc.page_content
                 ])
                 context = context[:1500]
 
-                # Prompt
+                # Format prompt
                 final_prompt = system_prompt.format(context=context)
 
-                # 🤖 LLM
+                # 🤖 Generate response
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -92,15 +89,19 @@ if user_input:
                 reply = response.choices[0].message.content
 
             except Exception as e:
-                st.error("🔥 FULL ERROR BELOW:")
-                st.code(traceback.format_exc())
-                reply = "⚠️ Backend crashed"
+                # Handle quota issue separately
+                if "insufficient_quota" in str(e):
+                    reply = "⚠️ Service temporarily unavailable. Please try again later."
+                else:
+                    st.error("⚠️ Something went wrong.")
+                    st.text(traceback.format_exc())
+                    reply = "⚠️ Backend error"
                 docs = []
 
         # Show response
         st.markdown(reply)
 
-        # 📚 Sources
+        # ------------------ SOURCES ------------------
         if docs:
             with st.expander("📚 Sources"):
                 for i, doc in enumerate(docs):
@@ -113,19 +114,20 @@ if user_input:
         "content": reply
     })
 
-    # Prepare logging data
-    sources = [doc.metadata.get("source", "Unknown") for doc in docs] if docs else []
-
-    # 📊 Logging (safe)
+    # ------------------ LOGGING ------------------
     try:
+        sources = [doc.metadata.get("source", "Unknown") for doc in docs] if docs else []
+
         log_to_google_sheets(
             user_input,
             reply,
             sources,
             st.session_state.session_id
         )
-    except Exception as e:
-        st.warning(f"⚠️ Logging failed: {e}")
 
-    # Refresh UI
-    #st.rerun()
+    except Exception as e:
+        pass  # silent fail (don't break UX)
+
+    # ------------------ REFRESH ------------------
+    if reply not in ["⚠️ Backend error"]:
+        st.rerun()
