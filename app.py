@@ -3,6 +3,7 @@ from openai import OpenAI
 import sys
 import os
 import uuid
+import traceback
 
 # Fix import path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
@@ -66,36 +67,35 @@ if user_input:
         with st.spinner("Thinking... 🤰"):
 
             try:
-                # 🔍 Retrieve docs
-                docs = vectorstore.similarity_search(user_input, k=3)
+    # 🔍 Retrieve docs
+    docs = vectorstore.similarity_search(user_input, k=3)
 
-                # Context handling
-                if docs:
-                    context = "\n\n".join([doc.page_content for doc in docs])
-                else:
-                    context = "No relevant context found."
+    # Context
+    context = "\n\n".join([
+        str(doc.page_content) for doc in docs if doc.page_content
+    ])
+    context = context[:1500]
 
-                context = context[:3000]
+    # Prompt
+    final_prompt = system_prompt.format(context=context)
 
-                # Prompt
-                final_prompt = system_prompt.format(context=context)
+    # 🤖 LLM
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": final_prompt},
+            {"role": "user", "content": user_input}
+        ],
+        temperature=0.5
+    )
 
-                # 🤖 LLM call
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": final_prompt},
-                        {"role": "user", "content": user_input}
-                    ],
-                    temperature=0.5
-                )
+    reply = response.choices[0].message.content
 
-                reply = response.choices[0].message.content
-
-            except Exception as e:
-                st.error(f"🔥 ERROR: {str(e)}")
-                reply = "⚠️ Backend failed. Check error above."
-                docs = []
+except Exception as e:
+    st.error("🔥 FULL ERROR BELOW:")
+    st.code(traceback.format_exc())
+    reply = "⚠️ Backend crashed"
+    docs = []
 
         # Show response
         st.markdown(reply)
