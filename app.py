@@ -128,4 +128,4 @@ if user_input:
         st.warning(f"⚠️ Logging failed: {e}")
 
     # Refresh UI
-    st.rerun()
+    #st.rerun()
