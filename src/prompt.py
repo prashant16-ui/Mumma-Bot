@@ -13,5 +13,3 @@ system_prompt = (
     "- Keep answers concise but helpful (3–5 sentences is fine).\n\n"
     "{context}"
 )
-
-
